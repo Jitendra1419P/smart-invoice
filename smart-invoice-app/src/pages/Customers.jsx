@@ -44,6 +44,10 @@ const Customers = () => {
     creditLimit: "5000",
   });
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [selectedBankId, setSelectedBankId] = useState("");
+  const [chequeNumber, setChequeNumber] = useState("");
 
   // Strict Theme Colors (100% Dark Mode Safe)
   const bgMain =
@@ -85,6 +89,20 @@ const Customers = () => {
         setCustomers(initialCustomers);
       }
     })();
+
+    (async () => {
+      try {
+        const data = await api.getBankAccounts();
+        if (!mounted) return;
+        setBankAccounts(data);
+        if (data.length > 0) {
+          setSelectedBankId(data[0]._id || data[0].id);
+        }
+      } catch (err) {
+        console.error("Error loading bank accounts in Customers", err);
+      }
+    })();
+
     return () => {
       mounted = false;
     };
@@ -180,7 +198,15 @@ const Customers = () => {
     const newBalance = Math.max(0, selectedCustomer.balance - amount);
     (async () => {
       try {
-        await api.updateCustomer(selectedCustomer.id, { totalDue: newBalance });
+        await api.updateCustomer(selectedCustomer.id, {
+          totalDue: newBalance,
+          paymentMethod: paymentMethod,
+          selectedBankId: (paymentMethod === "Cheque" || paymentMethod === "UPI") ? selectedBankId : undefined,
+          paidAmount: amount,
+          chequeNumber: (paymentMethod === "Cheque" || paymentMethod === "UPI") ? chequeNumber : undefined,
+          customerName: selectedCustomer.name,
+          paymentDate: new Date().toISOString().split("T")[0]
+        });
         setCustomers(
           customers.map((c) => {
             if (c.id === selectedCustomer.id) {
@@ -199,6 +225,8 @@ const Customers = () => {
     })();
     setIsPaymentModalOpen(false);
     setPaymentAmount("");
+    setPaymentMethod("Cash");
+    setChequeNumber("");
     setSelectedCustomer(null);
   };
 
@@ -742,6 +770,60 @@ const Customers = () => {
                   <IndianRupee size={18} className="mr-0.5" /> {selectedCustomer.balance}
                 </p>
               </div>
+
+              {/* Payment Method Selector */}
+              <div>
+                <label className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}>
+                  Payment Method
+                </label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none ${inputBg}`}
+                >
+                  <option value="Cash">Cash (Galla)</option>
+                  <option value="UPI">Online (UPI)</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+
+              {/* Target Bank Account Dropdown */}
+              {(paymentMethod === "UPI" || paymentMethod === "Cheque") && bankAccounts.length > 0 && (
+                <div>
+                  <label className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}>
+                    Select Target Bank Account
+                  </label>
+                  <select
+                    value={selectedBankId}
+                    onChange={(e) => setSelectedBankId(e.target.value)}
+                    className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none ${inputBg}`}
+                  >
+                    {bankAccounts.map((acc) => (
+                      <option key={acc._id || acc.id} value={acc._id || acc.id}>
+                        {acc.bankName} - {acc.accountName} (₹{acc.currentBalance.toLocaleString("en-IN")})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Reference/Cheque Number */}
+              {(paymentMethod === "UPI" || paymentMethod === "Cheque") && (
+                <div>
+                  <label className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}>
+                    {paymentMethod === "Cheque" ? "Cheque Number" : "UPI Ref Number"}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={chequeNumber}
+                    onChange={(e) => setChequeNumber(e.target.value)}
+                    className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none ${inputBg}`}
+                    placeholder={paymentMethod === "Cheque" ? "Enter Cheque Number" : "Enter UPI Ref Number"}
+                  />
+                </div>
+              )}
+
               <div>
                 <label
                   className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
@@ -775,7 +857,7 @@ const Customers = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-md"
+                  className="px-5 py-2 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-md cursor-pointer"
                 >
                   {t.jamaKarein || "Jama Karein (Save)"}
                 </button>

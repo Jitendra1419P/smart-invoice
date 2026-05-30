@@ -32,6 +32,40 @@ router.post("/", async (req, res) => {
       }
     }
 
+    // Automatic banking integration
+    const { paymentMode, activeBankId, grandTotal, customerName, date } = req.body;
+    const BankAccount = require("../models/BankAccount");
+    const BankTransaction = require("../models/BankTransaction");
+    let targetBankId = activeBankId;
+
+    if (paymentMode === "Cash") {
+      const cashAcc = await BankAccount.findOne({ accountNumber: "CASH-DRAWER" });
+      if (cashAcc) {
+        targetBankId = cashAcc._id;
+      }
+    }
+
+    if (targetBankId && (paymentMode === "Online (UPI)" || paymentMode === "Cheque" || paymentMode === "Cash")) {
+      // 1. Increment Target Bank account by grand total
+      await BankAccount.findOneAndUpdate(
+        { _id: targetBankId },
+        { $inc: { currentBalance: Number(grandTotal) } }
+      );
+
+      // 2. Automated Bank Transaction log add karo
+      const bankLog = new BankTransaction({
+        accountId: targetBankId,
+        type: "Deposit",
+        method: paymentMode === "Cash" ? "Cash" : (paymentMode === "Cheque" ? "Cheque" : "UPI"),
+        amount: Number(grandTotal),
+        chequeStatus: paymentMode === "Cheque" ? "Pending" : "None",
+        partyName: customerName || "One-Time Customer",
+        date: date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+        description: paymentMode === "Cash" ? `POS Cash Sale (SI-${savedInvoice.invoiceNumber})` : `POS Bill ${savedInvoice.invoiceNumber || ""}`
+      });
+      await bankLog.save();
+    }
+
     res.status(201).json(savedInvoice);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -69,6 +103,36 @@ router.delete("/:id", async (req, res) => {
         customer.totalDue = Math.max(0, (customer.totalDue ?? 0) - deletedInvoice.grandTotal);
         await customer.save();
       }
+    }
+
+    // 3. Bank rollback integration
+    let rollbackBankId = deletedInvoice.activeBankId;
+    if (deletedInvoice.paymentMode === "Cash") {
+      const BankAccount = require("../models/BankAccount");
+      const cashAcc = await BankAccount.findOne({ accountNumber: "CASH-DRAWER" });
+      if (cashAcc) {
+        rollbackBankId = cashAcc._id;
+      }
+    }
+
+    if (rollbackBankId && (deletedInvoice.paymentMode === "Online (UPI)" || deletedInvoice.paymentMode === "Cheque" || deletedInvoice.paymentMode === "Cash")) {
+      const BankAccount = require("../models/BankAccount");
+      const BankTransaction = require("../models/BankTransaction");
+
+      // Decrement target Bank balance back by the invoice amount (reversing deposit)
+      await BankAccount.findOneAndUpdate(
+        { _id: rollbackBankId },
+        { $inc: { currentBalance: -Number(deletedInvoice.grandTotal) } }
+      );
+
+      // Remove matching transaction ledger log
+      await BankTransaction.findOneAndDelete({
+        accountId: rollbackBankId,
+        type: "Deposit",
+        method: deletedInvoice.paymentMode === "Cash" ? "Cash" : (deletedInvoice.paymentMode === "Cheque" ? "Cheque" : "UPI"),
+        amount: Number(deletedInvoice.grandTotal),
+        partyName: deletedInvoice.customerName || "One-Time Customer"
+      });
     }
 
     res.json({ message: "Invoice deleted successfully" });

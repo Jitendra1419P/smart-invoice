@@ -63,6 +63,12 @@ const Expenses = () => {
         date: new Date().toISOString().split('T')[0],
     });
 
+    // Bank integration states
+    const [bankAccounts, setBankAccounts] = useState([]);
+    const [paymentMethod, setPaymentMethod] = useState('Cash');
+    const [selectedBankId, setSelectedBankId] = useState('');
+    const [chequeNumber, setChequeNumber] = useState('');
+
     // Strict Theme Colors (100% Dark Mode Safe)
     const bgMain =
         themeMode === 'dark'
@@ -87,7 +93,10 @@ const Expenses = () => {
         let mounted = true;
         (async () => {
             try {
-                const data = await api.getExpenses();
+                const [data, bankAccountsData] = await Promise.all([
+                    api.getExpenses(),
+                    api.getBankAccounts(),
+                ]);
                 if (!mounted) return;
                 const mapped = data.map((e) => ({
                     id: e._id || e.id,
@@ -99,6 +108,10 @@ const Expenses = () => {
                         : new Date().toISOString().split('T')[0],
                 }));
                 setExpenses(mapped);
+                setBankAccounts(bankAccountsData);
+                if (bankAccountsData.length > 0) {
+                    setSelectedBankId(bankAccountsData[0]._id || bankAccountsData[0].id);
+                }
             } catch (err) {
                 setExpenses(initialExpenses);
             }
@@ -271,6 +284,8 @@ const Expenses = () => {
             category: categories[0] || 'Chai-Paani',
             date: new Date().toISOString().split('T')[0],
         });
+        setPaymentMethod('Cash');
+        setChequeNumber('');
     };
 
     const handleEdit = (expense) => {
@@ -296,6 +311,9 @@ const Expenses = () => {
             amount: Number(formData.amount),
             description: formData.title,
             date: new Date(formData.date).toISOString(),
+            paymentMethod,
+            selectedBankId: (paymentMethod === 'Cheque' || paymentMethod === 'UPI') ? selectedBankId : undefined,
+            chequeNumber: (paymentMethod === 'Cheque' || paymentMethod === 'UPI') ? chequeNumber : undefined
         };
 
         if (editingId) {
@@ -1075,6 +1093,60 @@ const Expenses = () => {
                                     className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-red-500 ${inputBg}`}
                                 />
                             </div>
+
+                            <div>
+                                <label
+                                    className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                                >
+                                    Payment Method
+                                </label>
+                                <select
+                                    value={paymentMethod}
+                                    onChange={(e) => setPaymentMethod(e.target.value)}
+                                    className={`w-full px-3 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-red-500 ${inputBg}`}
+                                >
+                                    <option value="Cash">Cash</option>
+                                    <option value="UPI">UPI</option>
+                                    <option value="Cheque">Cheque</option>
+                                </select>
+                            </div>
+
+                            {(paymentMethod === 'UPI' || paymentMethod === 'Cheque') && bankAccounts.length > 0 && (
+                                <>
+                                    <div>
+                                        <label
+                                            className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                                        >
+                                            Select Source Bank Account
+                                        </label>
+                                        <select
+                                            value={selectedBankId}
+                                            onChange={(e) => setSelectedBankId(e.target.value)}
+                                            className={`w-full px-3 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-red-500 ${inputBg}`}
+                                        >
+                                            {bankAccounts.map((acc) => (
+                                                <option key={acc._id} value={acc._id}>
+                                                    {acc.bankName} - {acc.accountName} (₹{acc.currentBalance.toLocaleString("en-IN")})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label
+                                            className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                                        >
+                                            {paymentMethod === 'Cheque' ? 'Cheque Number' : 'UPI Ref/Transaction Number'}
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={chequeNumber}
+                                            onChange={(e) => setChequeNumber(e.target.value)}
+                                            className={`w-full px-3 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-red-500 ${inputBg}`}
+                                            placeholder={paymentMethod === 'Cheque' ? "e.g. 001234" : "e.g. UPI1293021"}
+                                        />
+                                    </div>
+                                </>
+                            )}
 
                             <div className="pt-4 flex justify-end gap-3">
                                 <button

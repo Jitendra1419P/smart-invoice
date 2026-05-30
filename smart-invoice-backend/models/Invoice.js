@@ -17,6 +17,8 @@ const invoiceSchema = new mongoose.Schema(
     tax: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     grandTotal: { type: Number, required: true },
+    paymentMode: { type: String, default: "Cash" },
+    activeBankId: { type: String },
     date: { type: Date, default: Date.now },
   },
   {

@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon,
   Store,
   History,
+  Landmark,
 } from "lucide-react";
 import useSettingsStore from "../store/settingsStore";
 import { translations } from "../data/translations";
@@ -140,6 +141,12 @@ const MainLayout = () => {
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-all ${isActive("/expenses")}`}
           >
             <Wallet size={20} /> {t.expenses}
+          </Link>
+          <Link
+            to="/banking"
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium transition-all ${isActive("/banking")}`}
+          >
+            <Landmark size={20} /> {t.banking || "Banking"}
           </Link>
         </nav>
 

@@ -11,6 +11,7 @@ import Customers from "./pages/Customers";
 import Expenses from "./pages/Expenses";
 import Suppliers from "./pages/Suppliers";
 import InvoiceHistory from "./pages/InvoiceHistory";
+import BankingDashboard from "./pages/BankingDashboard";
 
 function App() {
   const { themeMode } = useSettingsStore();
@@ -35,6 +36,7 @@ function App() {
           <Route path="customers" element={<Customers />} />
           <Route path="expenses" element={<Expenses />} />
           <Route path="suppliers" element={<Suppliers />} />
+          <Route path="banking" element={<BankingDashboard />} />
           {/* 
           <Route path="reports" element={<Reports />} /> */}
         </Route>

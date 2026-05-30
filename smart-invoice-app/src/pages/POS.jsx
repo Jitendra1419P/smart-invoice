@@ -16,6 +16,9 @@ import {
   ShoppingCart,
   IndianRupee,
   Tag,
+  Mic,
+  Loader2,
+  Volume2,
 } from "lucide-react";
 
 const POS = () => {
@@ -92,6 +95,11 @@ const POS = () => {
   const [cart, setCart] = useState([]);
   const [discount, setDiscount] = useState(defaultDiscount || 0);
 
+  const [isListening, setIsListening] = useState(false);
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+
   // Sync discount state with defaultDiscount setting when defaultDiscount changes or on mount
   useEffect(() => {
     setDiscount(defaultDiscount || 0);
@@ -147,6 +155,11 @@ const POS = () => {
     }
   };
 
+  // Bank Account & Payment Mode states
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [activeBankId, setActiveBankId] = useState("");
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -163,19 +176,143 @@ const POS = () => {
       }
     })();
 
+    (async () => {
+      try {
+        const data = await api.getBankAccounts();
+        if (!mounted) return;
+        setBankAccounts(data);
+        if (data.length > 0) {
+          setActiveBankId(data[0]._id || data[0].id);
+        }
+      } catch (err) {
+        console.error("Failed to load bank accounts in POS", err);
+      }
+    })();
+
     return () => {
       mounted = false;
     };
   }, []);
+
+  const handleVoiceBilling = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Aapka browser voice recognition support nahi karta. Kripya Google Chrome ya Microsoft Edge use karein.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.lang = language === "hi" ? "hi-IN" : "en-IN";
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setVoiceError("");
+      setVoiceTranscript("");
+    };
+
+    recognition.onerror = (e) => {
+      console.error("SpeechRecognition Error:", e);
+      setVoiceError(e.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.onresult = async (event) => {
+      const transcript = event.results[0][0].transcript;
+      setVoiceTranscript(transcript);
+      setAiProcessing(true);
+
+      try {
+        const result = await api.parseVoiceBilling(transcript);
+        
+        // 1. Match Customer
+        if (result.matchedCustomer) {
+          if (result.matchedCustomer.id) {
+            setSelectedCustomerId(result.matchedCustomer.id);
+            setCustomerName(result.matchedCustomer.name);
+            if (result.matchedCustomer.phone) {
+              setCustomerPhone(result.matchedCustomer.phone);
+            }
+          } else if (result.matchedCustomer.name) {
+            setSelectedCustomerId("");
+            setCustomerName(result.matchedCustomer.name);
+            setCustomerPhone(result.matchedCustomer.phone || "0000000000");
+          }
+        }
+
+        // 2. Match Items
+        if (result.items && Array.isArray(result.items)) {
+          let addedNames = [];
+          result.items.forEach((item) => {
+            const prod = products.find(
+              (p) => 
+                (item.productId && p.id === item.productId) || 
+                p.name.toLowerCase().includes(item.name.toLowerCase()) || 
+                item.name.toLowerCase().includes(p.name.toLowerCase())
+            );
+
+            if (prod) {
+              addedNames.push(`${item.qty}x ${prod.name}`);
+              setCart((prevCart) => {
+                const existing = prevCart.find((c) => c.id === prod.id);
+                if (existing) {
+                  return prevCart.map((c) => 
+                    c.id === prod.id ? { ...c, qty: c.qty + item.qty } : c
+                  );
+                } else {
+                  return [...prevCart, { ...prod, qty: item.qty }];
+                }
+              });
+            }
+          });
+
+          // Premium Speech Synthesis Confirmation
+          if (window.speechSynthesis) {
+            let confirmationText = `Cart mein ${addedNames.length > 0 ? addedNames.join(", ") : "items"} add kar diye gaye hain.`;
+            if (result.matchedCustomer && result.matchedCustomer.name) {
+              confirmationText += ` Grahak ${result.matchedCustomer.name} ko select kiya hai.`;
+            }
+            if (result.paymentMode === "Udhaar") {
+              confirmationText += " Aur payment mode Udhaar set kiya gaya hai.";
+            }
+            
+            const utterance = new SpeechSynthesisUtterance(confirmationText);
+            utterance.lang = "hi-IN";
+            window.speechSynthesis.speak(utterance);
+          }
+        }
+      } catch (err) {
+        console.error("AI parse voice error:", err);
+        alert("Aawaaz process karne mein dikkat aayi, kripya dobara try karein!");
+      } finally {
+        setAiProcessing(false);
+      }
+    };
+
+    recognition.start();
+  };
 
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   const addToCart = (product) => {
+    if (product.stock <= 0) {
+      alert("Maal stock me nahi hai! (Out of stock)");
+      return;
+    }
     setCart((prevCart) => {
       const existingItem = prevCart.find((item) => item.id === product.id);
       if (existingItem) {
+        if (existingItem.qty >= product.stock) {
+          alert(`Dukaan me sirf ${product.stock} hi stock bacha hai!`);
+          return prevCart;
+        }
         return prevCart.map((item) =>
           item.id === product.id ? { ...item, qty: item.qty + 1 } : item,
         );
@@ -187,9 +324,18 @@ const POS = () => {
 
   const updateQuantity = (id, delta) =>
     setCart((prevCart) =>
-      prevCart.map((item) =>
-        item.id === id ? { ...item, qty: Math.max(1, item.qty + delta) } : item,
-      ),
+      prevCart.map((item) => {
+        if (item.id === id) {
+          const newQty = item.qty + delta;
+          if (newQty < 1) return item;
+          if (newQty > item.stock) {
+            alert(`Dukaan me sirf ${item.stock} hi stock bacha hai!`);
+            return item;
+          }
+          return { ...item, qty: newQty };
+        }
+        return item;
+      })
     );
   const removeItem = (id) =>
     setCart((prevCart) => prevCart.filter((item) => item.id !== id));
@@ -295,7 +441,9 @@ const POS = () => {
         subTotal: subTotal,
         tax: tax,
         discount: Number(discountAmount.toFixed(2)) || 0,
-        grandTotal: Math.round(grandTotal)
+        grandTotal: Math.round(grandTotal),
+        paymentMode: paymentMode,
+        activeBankId: (paymentMode === "Online (UPI)" || paymentMode === "Cheque") ? activeBankId : undefined,
       });
     } catch (err) {
       console.error("Failed to save invoice record to DB", err);
@@ -312,7 +460,9 @@ const POS = () => {
     document.title = originalTitle;
 
     await saveInvoiceToDB();
-    await syncCustomerUdhaar(grandTotal);
+    if (paymentMode === "Udhaar") {
+      await syncCustomerUdhaar(grandTotal);
+    }
     await loadProductsFromDB();
 
     setCart([]);
@@ -361,7 +511,9 @@ const POS = () => {
     window.open(whatsappUrl, "_blank");
 
     await saveInvoiceToDB();
-    await syncCustomerUdhaar(grandTotal);
+    if (paymentMode === "Udhaar") {
+      await syncCustomerUdhaar(grandTotal);
+    }
     await loadProductsFromDB();
 
     setCart([]);
@@ -413,7 +565,7 @@ const POS = () => {
               placeholder={t.searchPlaceholder}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className={`w-full pl-10 pr-12 py-3.5 rounded-xl border-2 text-lg focus:outline-none focus:ring-0 transition-all ${
+              className={`w-full pl-10 pr-24 py-3.5 rounded-xl border-2 text-lg focus:outline-none focus:ring-0 transition-all ${
                 themeMode === "dark"
                   ? `bg-gray-800 border-gray-600 text-white focus:border-${primaryColor}-500`
                   : `bg-white border-gray-300 text-black shadow-sm focus:border-${primaryColor}-500`
@@ -422,50 +574,167 @@ const POS = () => {
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search size={22} className={textMuted} />
             </div>
-            <div className="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer">
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center gap-2">
+              {/* Glowing Mic Button */}
+              <button
+                type="button"
+                onClick={handleVoiceBilling}
+                disabled={aiProcessing}
+                className={`p-1.5 rounded-lg transition-all relative cursor-pointer ${
+                  isListening
+                    ? "bg-red-500 text-white animate-pulse shadow-md shadow-red-500/50 hover:bg-red-600"
+                    : aiProcessing
+                      ? "bg-amber-500 text-white animate-bounce"
+                      : themeMode === "dark"
+                        ? `bg-purple-900/40 text-purple-400 hover:bg-purple-800/40`
+                        : `bg-purple-100 text-purple-600 hover:bg-purple-200`
+                }`}
+                title="Bolo aur Bill Banao (AI Voice Billing)"
+              >
+                {aiProcessing ? <Loader2 size={24} className="animate-spin" /> : <Mic size={24} />}
+                {isListening && (
+                  <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500"></span>
+                  </span>
+                )}
+              </button>
+
               <div
-                className={`p-1.5 rounded-lg ${themeMode === "dark" ? `bg-${primaryColor}-900/40 text-${primaryColor}-400` : `bg-${primaryColor}-100 text-${primaryColor}-600`}`}
+                className={`p-1.5 rounded-lg cursor-pointer ${themeMode === "dark" ? `bg-${primaryColor}-900/40 text-${primaryColor}-400` : `bg-${primaryColor}-100 text-${primaryColor}-600`}`}
               >
                 <Barcode size={24} />
               </div>
             </div>
           </div>
 
+          {/* AI Voice Feedback Alert */}
+          {(isListening || aiProcessing || voiceTranscript || voiceError) && (
+            <div className={`mb-6 p-4 rounded-xl border flex items-center justify-between transition-all duration-300 ${
+              isListening 
+                ? "bg-red-500/10 border-red-500/30 text-red-500 animate-pulse"
+                : aiProcessing
+                  ? "bg-amber-500/10 border-amber-500/30 text-amber-500"
+                  : voiceError
+                    ? "bg-red-500/10 border-red-500/30 text-red-500"
+                    : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500"
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${
+                  isListening 
+                    ? "bg-red-500 text-white animate-pulse" 
+                    : aiProcessing 
+                      ? "bg-amber-500 text-white" 
+                      : voiceError 
+                        ? "bg-red-500 text-white" 
+                        : "bg-emerald-500 text-white"
+                }`}>
+                  {isListening ? <Mic size={18} /> : aiProcessing ? <Loader2 size={18} className="animate-spin" /> : voiceError ? <Mic size={18} /> : <Volume2 size={18} />}
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm">
+                    {isListening 
+                      ? "Listening... Kripya bolein!" 
+                      : aiProcessing 
+                        ? "AI Assistant: Processing voice..." 
+                        : voiceError 
+                          ? "Voice Recognition Failed" 
+                          : "AI Voice: Successfully Processed!"}
+                  </h4>
+                  <p className="text-xs opacity-90 mt-0.5 font-medium">
+                    {isListening 
+                      ? "Bolein: 'Ramesh ko 2 kilo Aashirvaad Atta aur 1 Amul Butter udhaar par de do'"
+                      : aiProcessing
+                        ? `Analysing: "${voiceTranscript}"`
+                        : voiceError
+                          ? `Error: ${voiceError}. Please verify mic permissions.`
+                          : `Cart & Customer loaded from: "${voiceTranscript}"`
+                    }
+                  </p>
+                </div>
+              </div>
+              {!isListening && !aiProcessing && (
+                <button 
+                  onClick={() => {
+                    setVoiceTranscript("");
+                    setVoiceError("");
+                  }}
+                  className={`text-xs underline font-bold px-2 py-1 rounded transition-colors ${
+                    themeMode === "dark" 
+                      ? "hover:bg-gray-700/50" 
+                      : "hover:bg-gray-100"
+                  } cursor-pointer`}
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Items Grid */}
           <div className="flex-1 overflow-y-auto pr-2">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pb-10">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  onClick={() => addToCart(product)}
-                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all hover:-translate-y-1 ${
-                    themeMode === "dark"
-                      ? `bg-gray-800 border-gray-700 hover:border-${primaryColor}-500`
-                      : `bg-white border-gray-100 hover:border-${primaryColor}-500 hover:shadow-md`
-                  }`}
-                >
-                  <h3 className="font-semibold text-sm mb-1 line-clamp-2">
-                    {product.name} {product.weight && <span className="text-xs font-normal text-gray-500">({product.weight})</span>}
-                  </h3>
-                  <div className="mt-3 flex items-center justify-between">
-                    <span
-                      className={`font-bold text-${primaryColor}-500 flex items-center text-lg`}
-                    >
-                      <IndianRupee size={16} />{" "}
-                      {product.salePrice || product.price}
-                    </span>
-                    <button
-                      className={`p-1.5 rounded-lg ${
-                        themeMode === "dark"
-                          ? `bg-${primaryColor}-900/40 text-${primaryColor}-400`
-                          : `bg-${primaryColor}-100 text-${primaryColor}-700`
-                      }`}
-                    >
-                      <Plus size={16} />
-                    </button>
+              {filteredProducts.map((product) => {
+                const isOutOfStock = product.stock <= 0;
+                const isLowStock = product.stock <= (product.minStock || 10) && product.stock > 0;
+
+                return (
+                  <div
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                    className={`p-4 rounded-xl border-2 transition-all ${
+                      isOutOfStock
+                        ? "opacity-60 cursor-not-allowed border-red-500/50 bg-red-500/5"
+                        : `cursor-pointer hover:-translate-y-1 ${
+                            themeMode === "dark"
+                              ? `bg-gray-800 border-gray-700 hover:border-${primaryColor}-500`
+                              : `bg-white border-gray-100 hover:border-${primaryColor}-500 hover:shadow-md`
+                          }`
+                    }`}
+                  >
+                    <h3 className="font-semibold text-sm mb-1 line-clamp-2">
+                      {product.name} {product.weight && <span className="text-xs font-normal text-gray-500">({product.weight})</span>}
+                    </h3>
+
+                    {/* Dynamic Stock Badge */}
+                    <div className="mt-1">
+                      {isOutOfStock ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400 border border-red-200 dark:border-red-900/40">
+                          Out of Stock
+                        </span>
+                      ) : isLowStock ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40">
+                          Low Stock: {product.stock}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40">
+                          Stock: {product.stock}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <span
+                        className={`font-bold text-${primaryColor}-500 flex items-center text-lg`}
+                      >
+                        <IndianRupee size={16} />{" "}
+                        {product.salePrice || product.price}
+                      </span>
+                      {!isOutOfStock && (
+                        <button
+                          className={`p-1.5 rounded-lg ${
+                            themeMode === "dark"
+                              ? `bg-${primaryColor}-900/40 text-${primaryColor}-400`
+                              : `bg-${primaryColor}-100 text-${primaryColor}-700`
+                          }`}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -740,6 +1009,49 @@ const POS = () => {
                   <IndianRupee size={24} className="mr-1" />{" "}
                   {Math.round(grandTotal)}
                 </span>
+              </div>
+
+              {/* Payment Mode Selection */}
+              <div className="mt-4 pt-3 border-t border-gray-300 dark:border-gray-700 space-y-2">
+                <label className={`block text-xs font-bold uppercase tracking-wider ${textMuted}`}>
+                  Payment Mode
+                </label>
+                <div className="grid grid-cols-4 gap-1 bg-gray-150 dark:bg-gray-900/60 p-1 rounded-lg">
+                  {["Cash", "Online (UPI)", "Cheque", "Udhaar"].map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setPaymentMode(mode)}
+                      className={`py-1.5 text-[10px] font-extrabold rounded-md transition-all cursor-pointer ${
+                        paymentMode === mode
+                          ? `bg-${primaryColor}-600 text-white shadow-sm`
+                          : `${textMuted} hover:text-white`
+                      }`}
+                    >
+                      {mode === "Online (UPI)" ? "UPI" : mode}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Bank Account Selection Dropdown */}
+                {(paymentMode === "Online (UPI)" || paymentMode === "Cheque") && bankAccounts.length > 0 && (
+                  <div className="space-y-1 mt-2">
+                    <label className={`block text-[10px] font-bold uppercase tracking-wider ${textMuted}`}>
+                      Select Target Bank Account
+                    </label>
+                    <select
+                      value={activeBankId}
+                      onChange={(e) => setActiveBankId(e.target.value)}
+                      className={`w-full px-3 py-1.5 text-xs rounded-lg border focus:outline-none focus:ring-1 focus:ring-${primaryColor}-500 ${inputBg}`}
+                    >
+                      {bankAccounts.map((acc) => (
+                        <option key={acc._id} value={acc._id}>
+                          {acc.bankName} - {acc.accountName} (₹{acc.currentBalance.toLocaleString("en-IN")})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
 

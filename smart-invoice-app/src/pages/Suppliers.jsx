@@ -55,6 +55,12 @@ const Suppliers = () => {
     });
     const [paymentAmount, setPaymentAmount] = useState('');
 
+    // Bank integration states
+    const [bankAccounts, setBankAccounts] = useState([]);
+    const [paymentMethod, setPaymentMethod] = useState('Cash');
+    const [selectedBankId, setSelectedBankId] = useState('');
+    const [chequeNumber, setChequeNumber] = useState('');
+
     // NEW: Purchase Entry Form States
     const [purchaseData, setPurchaseData] = useState({
         productName: '',
@@ -88,9 +94,10 @@ const Suppliers = () => {
         let mounted = true;
         (async () => {
             try {
-                const [suppliersData, productsData] = await Promise.all([
+                const [suppliersData, productsData, bankAccountsData] = await Promise.all([
                     api.getSuppliers(),
                     api.getProducts(),
+                    api.getBankAccounts(),
                 ]);
                 if (!mounted) return;
 
@@ -124,8 +131,13 @@ const Suppliers = () => {
                     });
                 });
                 setSupplierProducts(grouped);
+
+                setBankAccounts(bankAccountsData);
+                if (bankAccountsData.length > 0) {
+                    setSelectedBankId(bankAccountsData[0]._id || bankAccountsData[0].id);
+                }
             } catch (err) {
-                console.error('Load suppliers and products failed', err);
+                console.error('Load suppliers, products and banks failed', err);
                 setSuppliers(initialSuppliers);
                 setSupplierProducts(initialSupplierProducts);
             }
@@ -281,6 +293,12 @@ const Suppliers = () => {
             try {
                 await api.updateSupplier(selectedSupplier.id, {
                     totalPayable: newPayable,
+                    paymentMethod,
+                    selectedBankId: (paymentMethod === 'Cheque' || paymentMethod === 'UPI') ? selectedBankId : undefined,
+                    paidAmount: amount,
+                    chequeNumber: paymentMethod === 'Cheque' || paymentMethod === 'UPI' ? chequeNumber : undefined,
+                    supplierName: selectedSupplier.name,
+                    paymentDate: new Date().toISOString().split('T')[0]
                 });
                 setSuppliers(
                     suppliers.map((s) =>
@@ -295,6 +313,8 @@ const Suppliers = () => {
         })();
         setIsPaymentModalOpen(false);
         setPaymentAmount('');
+        setPaymentMethod('Cash');
+        setChequeNumber('');
         setSelectedSupplier(null);
     };
 
@@ -1157,6 +1177,60 @@ const Suppliers = () => {
                                     />
                                 </div>
                             </div>
+
+                            <div>
+                                <label
+                                    className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                                >
+                                    Payment Method
+                                </label>
+                                <select
+                                    value={paymentMethod}
+                                    onChange={(e) => setPaymentMethod(e.target.value)}
+                                    className={`w-full px-3 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-500 ${inputBg}`}
+                                >
+                                    <option value="Cash">Cash</option>
+                                    <option value="UPI">UPI</option>
+                                    <option value="Cheque">Cheque</option>
+                                </select>
+                            </div>
+
+                            {(paymentMethod === 'UPI' || paymentMethod === 'Cheque') && bankAccounts.length > 0 && (
+                                <>
+                                    <div>
+                                        <label
+                                            className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                                        >
+                                            Select Source Bank Account
+                                        </label>
+                                        <select
+                                            value={selectedBankId}
+                                            onChange={(e) => setSelectedBankId(e.target.value)}
+                                            className={`w-full px-3 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-500 ${inputBg}`}
+                                        >
+                                            {bankAccounts.map((acc) => (
+                                                <option key={acc._id} value={acc._id}>
+                                                    {acc.bankName} - {acc.accountName} (₹{acc.currentBalance.toLocaleString("en-IN")})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label
+                                            className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                                        >
+                                            {paymentMethod === 'Cheque' ? 'Cheque Number' : 'UPI Ref/Transaction Number'}
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={chequeNumber}
+                                            onChange={(e) => setChequeNumber(e.target.value)}
+                                            className={`w-full px-3 py-2.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-amber-500 ${inputBg}`}
+                                            placeholder={paymentMethod === 'Cheque' ? "e.g. 001234" : "e.g. UPI1293021"}
+                                        />
+                                    </div>
+                                </>
+                            )}
                             <div className="pt-4 flex justify-end gap-3">
                                 <button
                                     type="button"

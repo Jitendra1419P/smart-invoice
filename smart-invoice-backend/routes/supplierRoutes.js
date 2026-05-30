@@ -26,6 +26,42 @@ router.post("/", async (req, res) => {
 // Update a supplier
 router.put("/:id", async (req, res) => {
   try {
+    const { paymentMethod, selectedBankId, paidAmount, chequeNumber, supplierName, paymentDate } = req.body;
+    let targetBankId = selectedBankId;
+
+    if (paymentMethod === "Cash" && paidAmount > 0) {
+      const BankAccount = require("../models/BankAccount");
+      const cashAcc = await BankAccount.findOne({ accountNumber: "CASH-DRAWER" });
+      if (cashAcc) {
+        targetBankId = cashAcc._id;
+      }
+    }
+
+    if (targetBankId && paidAmount > 0 && (paymentMethod === "Cheque" || paymentMethod === "UPI" || paymentMethod === "Cash")) {
+      const BankAccount = require("../models/BankAccount");
+      const BankTransaction = require("../models/BankTransaction");
+
+      // 1. Bank account se absolute capital deduct karo
+      await BankAccount.findOneAndUpdate(
+        { _id: targetBankId },
+        { $inc: { currentBalance: -Number(paidAmount) } }
+      );
+
+      // 2. Safe withdrawal entry lock karo
+      const bankLog = new BankTransaction({
+        accountId: targetBankId,
+        type: "Withdrawal",
+        method: paymentMethod,
+        amount: Number(paidAmount),
+        referenceNumber: chequeNumber || "",
+        chequeStatus: paymentMethod === "Cheque" ? "Pending" : "None",
+        partyName: supplierName || "Supplier",
+        date: paymentDate || new Date().toISOString().split("T")[0],
+        description: paymentMethod === "Cash" ? `Supplier Cash Payment` : `Supplier payment to ${supplierName || "Supplier"}`
+      });
+      await bankLog.save();
+    }
+
     const updatedSupplier = await Supplier.findByIdAndUpdate(
       req.params.id,
       req.body,
