@@ -38,7 +38,7 @@ router.get("/transactions", async (req, res) => {
 
 // 4. Create a manual transaction / Transfer
 router.post("/transactions", async (req, res) => {
-  const { accountId, type, method, amount, referenceNumber, partyName, date, description, transferTargetAccountId } = req.body;
+  const { accountId, type, method, amount, referenceNumber, partyName, date, description, transferTargetAccountId, chequeStatus } = req.body;
   try {
     const BankAccount = require("../models/BankAccount");
     const BankTransaction = require("../models/BankTransaction");
@@ -131,7 +131,7 @@ router.post("/transactions", async (req, res) => {
       method,
       amount: Number(amount),
       referenceNumber: referenceNumber || "",
-      chequeStatus: method === "Cheque" ? "Pending" : "None",
+      chequeStatus: chequeStatus || (method === "Cheque" ? "Pending" : "None"),
       partyName: partyName || "Self",
       date: date || new Date().toISOString().split("T")[0],
       description: description || ""
@@ -198,6 +198,67 @@ router.put("/:id", async (req, res) => {
     res.json(updatedAccount);
   } catch (error) {
     res.status(400).json({ message: error.message });
+  }
+});
+
+// 7. Brand new Bank Transaction Form API for shopkeeper actions (Galle / Bank deposits & withdrawals)
+router.post("/transaction", async (req, res) => {
+  const { type, amount, method, referenceNumber, description, date, accountId, selectedBankId, chequeStatus } = req.body;
+
+  try {
+    // Fetch target bank account: specified account, first business account, or any available account
+    const targetId = accountId || selectedBankId;
+    let bank = null;
+    if (targetId) {
+      bank = await BankAccount.findById(targetId);
+    }
+    if (!bank) {
+      bank = await BankAccount.findOne({ accountNumber: { $ne: "CASH-DRAWER" } });
+    }
+    if (!bank) {
+      bank = await BankAccount.findOne();
+    }
+
+    if (!bank) {
+      return res.status(440).json({ message: "No active bank account found!" });
+    }
+
+    const txAmount = Number(amount || 0);
+
+    // Balance calculation
+    if (type === "Deposit") {
+      bank.currentBalance += txAmount;
+    } else if (type === "Withdrawal") {
+      if (bank.currentBalance < txAmount) {
+        return res.status(400).json({ message: "Galle me ya Bank me itna paisa nahi hai bhai!" });
+      }
+      bank.currentBalance -= txAmount;
+    } else {
+      return res.status(400).json({ message: "Invalid transaction type" });
+    }
+
+    await bank.save();
+
+    // Create ledger transaction entry
+    const newTx = new BankTransaction({
+      accountId: bank._id,
+      type,
+      method: method || "Cash",
+      amount: txAmount,
+      referenceNumber: referenceNumber || "",
+      chequeStatus: chequeStatus || (method === "Cheque" ? "Pending" : "None"),
+      description: description || `Shopkeeper Manual ${type}`,
+      date: date || new Date().toISOString().split("T")[0]
+    });
+    await newTx.save();
+
+    res.status(201).json({ 
+      message: "Transaction completed successfully", 
+      currentBalance: bank.currentBalance,
+      transaction: newTx
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 

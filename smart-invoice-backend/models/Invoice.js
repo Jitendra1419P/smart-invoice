@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const invoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: { type: String, required: true, unique: true },
-    customerName: { type: String, required: true },
+    customerName: { type: String, default: "Walk-in Customer" },
     customerPhone: { type: String },
     cart: [
       {

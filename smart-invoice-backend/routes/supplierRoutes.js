@@ -87,4 +87,44 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// 🚀 AUTOMATED MAAL ENTRY & STOCK INCREMENT ENGINE
+router.post('/procure', async (req, res) => {
+  const { supplierId, productId, quantity, totalCost, isPaid } = req.body;
+
+  try {
+    const Product = require("../models/Product");
+    const Supplier = require("../models/Supplier");
+
+    // Action A: Inventory me target product ka stock badhao (+ inc)
+    const updatedProduct = await Product.findByIdAndUpdate(
+      productId,
+      { $inc: { stock: Number(quantity) } },
+      { new: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({ message: "Bhai yeh product inventory me nahi mila!" });
+    }
+
+    // Action B: Supplier ke ledger me total payable balance badhao (Agar udhaar par maal aaya hai)
+    // Agar turant cash paid kar diya, toh liability 0 badhegi, varna total cost jodd di jayegi
+    const liabilityDelta = isPaid ? 0 : Number(totalCost);
+
+    const updatedSupplier = await Supplier.findByIdAndUpdate(
+      supplierId,
+      { $inc: { totalPayable: liabilityDelta } },
+      { new: true }
+    );
+
+    res.status(200).json({
+      message: "⚡ Maal Entry Successful! Stock and Ledger updated concurrently.",
+      product: updatedProduct,
+      supplier: updatedSupplier
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 module.exports = router;

@@ -60,6 +60,11 @@ export const deleteSupplier = async (id) => {
   return data;
 };
 
+export const procureSupplierGoods = async (payload) => {
+  const { data } = await client.post("/suppliers/procure", payload);
+  return data;
+};
+
 export const getExpenses = async () => {
   const { data } = await client.get("/expenses");
   return data;
@@ -149,8 +154,14 @@ export const getCashFlowMetrics = async () => {
   return data;
 };
 
+export const getDashboardSummary = async () => {
+  const { data } = await client.get("/dashboard/summary");
+  return data;
+};
+
 export default {
   getProducts,
+  getDashboardSummary,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -162,6 +173,7 @@ export default {
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  procureSupplierGoods,
   getExpenses,
   createExpense,
   updateExpense,

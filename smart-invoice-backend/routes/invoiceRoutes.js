@@ -17,53 +17,95 @@ router.get("/", async (req, res) => {
 // Create a new invoice
 router.post("/", async (req, res) => {
   try {
+    // 1. Fallback default customer details to allow shortcuts and instant billing without customer name
+    if (!req.body.customerName) {
+      req.body.customerName = "Walk-in Customer";
+    }
+
+    // Support both 'cart' and 'items' structures in the payload
+    if (!req.body.cart && req.body.items && Array.isArray(req.body.items)) {
+      req.body.cart = req.body.items.map(item => ({
+        id: String(item.productId || item.id || item._id),
+        name: item.name || "Product",
+        salePrice: Number(item.salePrice || item.price || 0),
+        qty: Number(item.qty || 0)
+      }));
+    } else if (!req.body.items && req.body.cart && Array.isArray(req.body.cart)) {
+      req.body.items = req.body.cart.map(item => ({
+        productId: String(item.id || item._id),
+        name: item.name,
+        qty: Number(item.qty)
+      }));
+    }
+
     const newInvoice = new Invoice(req.body);
     const savedInvoice = await newInvoice.save();
 
-    // Decrement stock for each item in the cart
-    if (req.body.cart && Array.isArray(req.body.cart)) {
-      for (const item of req.body.cart) {
-        if (item.id) {
-          await Product.findByIdAndUpdate(
-            item.id,
-            { $inc: { stock: -Number(item.qty) } }
-          );
-        }
+    // 2. Decrement stock for each item in the normalized cart/items list
+    const items = req.body.items || req.body.cart || [];
+    for (const item of items) {
+      const productId = item.productId || item.id;
+      const qty = item.qty || 0;
+      if (productId && qty > 0) {
+        await Product.findByIdAndUpdate(productId, {
+          $inc: { stock: -Number(qty) }
+        });
       }
     }
 
-    // Automatic banking integration
+    // 3. INTERLINKING: Automatic banking integration
     const { paymentMode, activeBankId, grandTotal, customerName, date } = req.body;
     const BankAccount = require("../models/BankAccount");
     const BankTransaction = require("../models/BankTransaction");
-    let targetBankId = activeBankId;
 
-    if (paymentMode === "Cash") {
+    if (paymentMode === "Online (UPI)" || paymentMode === "Cheque") {
+      // Dukan ka bank account dhoondho (Hum activeBankId ya main business bank account default maan rahe hain)
+      let bank = null;
+      if (activeBankId) {
+        bank = await BankAccount.findById(activeBankId);
+      }
+      if (!bank) {
+        bank = await BankAccount.findOne({ accountNumber: { $ne: "CASH-DRAWER" } });
+      }
+      if (!bank) {
+        bank = await BankAccount.findOne();
+      }
+
+      if (bank) {
+        // Balance badhao
+        bank.currentBalance += Number(grandTotal || 0);
+        await bank.save();
+
+        // Bank passbook me entry pass karo
+        const bankLog = new BankTransaction({
+          accountId: bank._id,
+          type: "Deposit",
+          method: paymentMode === "Cheque" ? "Cheque" : "UPI",
+          amount: Number(grandTotal || 0),
+          chequeStatus: paymentMode === "Cheque" ? "Pending" : "None",
+          partyName: customerName || "Walk-in Customer",
+          date: date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+          description: `POS Bill ${savedInvoice.invoiceNumber || req.body.invoiceNumber || ""} Automated Sync`
+        });
+        await bankLog.save();
+      }
+    } else if (paymentMode === "Cash") {
       const cashAcc = await BankAccount.findOne({ accountNumber: "CASH-DRAWER" });
       if (cashAcc) {
-        targetBankId = cashAcc._id;
+        cashAcc.currentBalance += Number(grandTotal || 0);
+        await cashAcc.save();
+
+        const bankLog = new BankTransaction({
+          accountId: cashAcc._id,
+          type: "Deposit",
+          method: "Cash",
+          amount: Number(grandTotal || 0),
+          partyName: customerName || "Walk-in Customer",
+          date: date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
+          description: `POS Cash Sale (SI-${savedInvoice.invoiceNumber || req.body.invoiceNumber || ""})`
+        });
+        await bankLog.save();
       }
-    }
-
-    if (targetBankId && (paymentMode === "Online (UPI)" || paymentMode === "Cheque" || paymentMode === "Cash")) {
-      // 1. Increment Target Bank account by grand total
-      await BankAccount.findOneAndUpdate(
-        { _id: targetBankId },
-        { $inc: { currentBalance: Number(grandTotal) } }
-      );
-
-      // 2. Automated Bank Transaction log add karo
-      const bankLog = new BankTransaction({
-        accountId: targetBankId,
-        type: "Deposit",
-        method: paymentMode === "Cash" ? "Cash" : (paymentMode === "Cheque" ? "Cheque" : "UPI"),
-        amount: Number(grandTotal),
-        chequeStatus: paymentMode === "Cheque" ? "Pending" : "None",
-        partyName: customerName || "One-Time Customer",
-        date: date ? new Date(date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0],
-        description: paymentMode === "Cash" ? `POS Cash Sale (SI-${savedInvoice.invoiceNumber})` : `POS Bill ${savedInvoice.invoiceNumber || ""}`
-      });
-      await bankLog.save();
     }
 
     res.status(201).json(savedInvoice);

@@ -12,6 +12,7 @@ const invoiceRoutes = require("./routes/invoiceRoutes");
 const aiRoutes = require("./routes/aiRoutes");
 const bankRoutes = require("./routes/bankRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 
 // Initialize app
 const app = express();
@@ -31,7 +32,9 @@ app.use("/api/expenses", expenseRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/banks", bankRoutes);
+app.use("/api/bank", bankRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 const PORT = process.env.PORT || 5000;
 

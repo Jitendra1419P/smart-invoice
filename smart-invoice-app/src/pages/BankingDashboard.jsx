@@ -17,6 +17,10 @@ import {
   Check,
   Calendar,
   Edit,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  ArrowLeftRight,
+  Printer,
 } from "lucide-react";
 
 const BankingDashboard = () => {
@@ -64,6 +68,7 @@ const BankingDashboard = () => {
     referenceNumber: "",
     description: "Shop Cash Deposit (Galla -> Bank)",
     transferTargetAccountId: "",
+    chequeStatus: "None",
   });
 
   // Load dashboard data
@@ -187,6 +192,7 @@ const BankingDashboard = () => {
         referenceNumber: "",
         description: transactionType === "Deposit" ? "Shop Cash Deposit (Galla -> Bank)" : "Shop Cash Withdrawal (Bank -> Galla)",
         transferTargetAccountId: "",
+        chequeStatus: "None",
       });
       await loadData();
     } catch (err) {
@@ -247,7 +253,7 @@ const BankingDashboard = () => {
         </div>
 
         {/* SHOPKEEPER ACTIONS & ACCOUNT LINK ACTION */}
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3 print:hidden">
           <button
             onClick={() => {
               setTransactionType("Deposit");
@@ -258,6 +264,7 @@ const BankingDashboard = () => {
                 referenceNumber: "",
                 description: "Shop Cash Deposit (Galla -> Bank)",
                 transferTargetAccountId: "",
+                chequeStatus: "None",
               });
               setIsModalOpen(true);
             }}
@@ -275,13 +282,23 @@ const BankingDashboard = () => {
           >
             <Plus size={16} /> Bank Account Link
           </button>
+          <button
+            onClick={() => window.print()}
+            className={`px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md border ${
+              themeMode === "dark" 
+                ? "bg-gray-800 border-gray-700 text-white hover:bg-gray-750" 
+                : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+            } hover:-translate-y-0.5 text-xs cursor-pointer`}
+          >
+            <Printer size={16} className="text-blue-500" /> Print Ledger
+          </button>
         </div>
       </div>
 
       {/* ========================================= */}
       {/* SECTION 1: LIVE BANK ACCOUNTS DISPLAY */}
       {/* ========================================= */}
-      <div className="mb-6">
+      <div className="mb-6 print:hidden">
         <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">Active Bank Accounts</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {accounts.filter(acc => acc.accountNumber !== "CASH-DRAWER").map((acc) => (
@@ -378,10 +395,40 @@ const BankingDashboard = () => {
         </div>
       </div>
 
+      {/* Print-only grouped summary box */}
+      <div className="hidden print:block p-5 mb-8 border-2 border-black rounded-xl bg-white text-black font-mono shadow-sm">
+        <h3 className="text-xs font-black uppercase tracking-wider mb-4 border-b-2 border-black pb-2 flex justify-between">
+          <span>🏦 DUKAAN BANK & CASH BALANCES SUMMARY</span>
+          <span className="text-[10px] font-mono normal-case text-gray-500">Statement Generated on: {new Date().toLocaleDateString('en-IN')}</span>
+        </h3>
+        <div className="grid grid-cols-3 gap-6 text-xs">
+          {accounts.filter(acc => acc.accountNumber !== "CASH-DRAWER").map((acc) => (
+            <div key={acc._id} className="border-r border-gray-300 pr-4 last:border-r-0">
+              <p className="font-black text-sm uppercase text-blue-700 tracking-tight">{acc.bankName}</p>
+              <p className="text-[10px] text-gray-600 font-bold mt-0.5">{acc.accountName}</p>
+              <p className="text-[9px] text-gray-500 font-mono mt-2">A/c: **** {acc.accountNumber.slice(-4)}</p>
+              <p className="text-lg font-black mt-1 font-mono text-gray-900">₹{acc.currentBalance.toLocaleString("en-IN")}</p>
+            </div>
+          ))}
+          {(() => {
+            const cashAccount = accounts.find(acc => acc.accountNumber === "CASH-DRAWER");
+            const cashBalance = cashAccount ? cashAccount.currentBalance : (metrics.cashInHand || 0);
+            return (
+              <div className="pr-4 border-r border-gray-300 last:border-r-0">
+                <p className="font-black text-sm uppercase text-emerald-600 tracking-tight">CASH IN HAND</p>
+                <p className="text-[10px] text-gray-600 font-bold mt-0.5">Dukaan Cash Drawer</p>
+                <p className="text-[9px] text-gray-500 font-mono mt-2">Galla / Cash Counter</p>
+                <p className="text-lg font-black mt-1 font-mono text-emerald-600">₹{cashBalance.toLocaleString("en-IN")}</p>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+
       {/* ========================================= */}
       {/* PIPELINE CHEQUE MONITORING CARDS */}
       {/* ========================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8 print:hidden">
         <div
           onClick={() => setActiveFilter(activeFilter === "PendingCheque" ? "All" : "PendingCheque")}
           className={`p-5 rounded-2xl border shadow-sm flex items-center justify-between cursor-pointer transition-all hover:scale-[1.01] ${
@@ -426,7 +473,7 @@ const BankingDashboard = () => {
             <p className={`text-xs ${textMuted}`}>Auto-sync entries from billing checkout, suppliers, and expenses.</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto print:hidden">
             <div className="relative flex-1 sm:w-64">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search size={18} className={textMuted} />
@@ -467,8 +514,8 @@ const BankingDashboard = () => {
                 <th className="p-4">Party/Description</th>
                 <th className="p-4">Method/Ref</th>
                 <th className="p-4">Status</th>
-                <th className="p-4 text-right">Amount</th>
-                <th className="p-4 text-center">Action</th>
+                <th className="p-4 text-right text-red-500">Debit (Withdrawal)</th>
+                <th className="p-4 text-right text-emerald-500">Credit (Deposit)</th>
               </tr>
             </thead>
             <tbody className="text-sm">
@@ -517,30 +564,11 @@ const BankingDashboard = () => {
                           {t.chequeStatus}
                         </span>
                       </td>
-                      <td className={`p-4 text-right font-black font-mono ${isDeposit ? "text-emerald-500" : "text-red-500"}`}>
-                        {isDeposit ? "+" : "-"}₹{t.amount.toLocaleString("en-IN")}
+                      <td className="p-4 text-right font-semibold font-mono text-red-500">
+                        {!isDeposit ? `-₹${t.amount.toLocaleString("en-IN")}` : "---"}
                       </td>
-                      <td className="p-4 text-center">
-                        {t.method === "Cheque" && t.chequeStatus === "Pending" ? (
-                          <div className="flex justify-center gap-1.5">
-                            <button
-                              onClick={() => handleUpdateCheque(t._id, "Cleared")}
-                              className="p-1 rounded-lg text-emerald-500 hover:bg-emerald-500/10 transition-colors cursor-pointer"
-                              title="Clear Cheque"
-                            >
-                              <Check size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleUpdateCheque(t._id, "Bounced")}
-                              className="p-1 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
-                              title="Bounce Cheque"
-                            >
-                              <AlertTriangle size={16} />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className={`text-xs italic ${textMuted}`}>---</span>
-                        )}
+                      <td className="p-4 text-right font-black font-mono text-emerald-500">
+                        {isDeposit ? `+₹${t.amount.toLocaleString("en-IN")}` : "---"}
                       </td>
                     </tr>
                   );
@@ -576,15 +604,21 @@ const BankingDashboard = () => {
                         : (type === "Deposit" ? "Shop Cash Deposit (Galla -> Bank)" : "Shop Cash Withdrawal (Bank -> Galla)"),
                       method: type === "Transfer" ? "UPI" : "Cash",
                       transferTargetAccountId: type === "Transfer" && accounts.length > 1 ? (accounts[1]._id !== "CASH-DRAWER" ? accounts[1]._id : accounts[0]._id) : "",
+                      chequeStatus: "None",
                     }));
                   }}
-                  className={`py-2 px-1 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer text-center whitespace-nowrap ${
+                  className={`py-2.5 px-1 text-xs sm:text-sm font-bold rounded-lg transition-all cursor-pointer text-center whitespace-nowrap ${
                     transactionType === type
                       ? `bg-${primaryColor}-600 text-white shadow-sm`
                       : `${textMuted} hover:text-white`
                   }`}
                 >
-                  {type === "Deposit" ? "📥 Jama (Deposit)" : type === "Withdrawal" ? "📤 Nikalein (Withdraw)" : "🔄 Transfer"}
+                  <span className="flex items-center justify-center gap-1.5">
+                    {type === "Deposit" && <ArrowDownCircle size={14} />}
+                    {type === "Withdrawal" && <ArrowUpCircle size={14} />}
+                    {type === "Transfer" && <ArrowLeftRight size={14} />}
+                    {type === "Deposit" ? "Jama (Deposit)" : type === "Withdrawal" ? "Nikalein (Withdraw)" : "Transfer"}
+                  </span>
                 </button>
               ))}
             </div>
@@ -654,7 +688,14 @@ const BankingDashboard = () => {
                     <label className="block text-xs font-bold uppercase mb-1">Transfer Method</label>
                     <select
                       value={formData.method}
-                      onChange={(e) => setFormData({ ...formData, method: e.target.value })}
+                      onChange={(e) => {
+                        const m = e.target.value;
+                        setFormData({ 
+                          ...formData, 
+                          method: m,
+                          chequeStatus: m === "Cheque" ? "Pending" : "None"
+                        });
+                      }}
                       className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
                     >
                       <option value="Cash">💵 Cash (Galla Transfer)</option>
@@ -707,7 +748,14 @@ const BankingDashboard = () => {
                     <label className="block text-xs font-bold uppercase mb-1">Transaction Method</label>
                     <select
                       value={formData.method}
-                      onChange={(e) => setFormData({ ...formData, method: e.target.value })}
+                      onChange={(e) => {
+                        const m = e.target.value;
+                        setFormData({ 
+                          ...formData, 
+                          method: m,
+                          chequeStatus: m === "Cheque" ? "Pending" : "None"
+                        });
+                      }}
                       className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
                     >
                       <option value="Cash">💵 Cash (Galla Transaction)</option>
@@ -730,6 +778,20 @@ const BankingDashboard = () => {
                   />
                 </div>
               )}
+
+              <div>
+                <label className="block text-xs font-bold uppercase mb-1">Transaction Status</label>
+                <select
+                  value={formData.chequeStatus}
+                  onChange={(e) => setFormData({ ...formData, chequeStatus: e.target.value })}
+                  className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
+                >
+                  <option value="None">None (Instantly Completed)</option>
+                  <option value="Pending">Pending (Awaiting clearance)</option>
+                  <option value="Cleared">Cleared (Successfully processed)</option>
+                  <option value="Bounced">Bounced (Failed/Cancelled)</option>
+                </select>
+              </div>
 
               {/* Action Triggers */}
               <div className="flex gap-3 mt-6 pt-2">

@@ -21,6 +21,10 @@ import {
   AlertTriangle,
   Edit,
   Printer,
+  Grid,
+  List,
+  Send,
+  CheckCircle,
 } from "lucide-react";
 
 const Customers = () => {
@@ -35,6 +39,8 @@ const Customers = () => {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [viewMode, setViewMode] = useState("grid"); // grid or table
+  const [loading, setLoading] = useState(true);
 
   // Form States
   const [newCustomer, setNewCustomer] = useState({
@@ -42,6 +48,7 @@ const Customers = () => {
     phone: "",
     openingBalance: "",
     creditLimit: "5000",
+    dueDate: "",
   });
   const [paymentAmount, setPaymentAmount] = useState("");
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -73,20 +80,24 @@ const Customers = () => {
     let mounted = true;
     (async () => {
       try {
+        setLoading(true);
         const data = await api.getCustomers();
         if (!mounted) return;
         const mapped = data.map((c) => ({
           id: c._id || c.id,
           name: c.name,
           phone: c.phone,
-          balance: c.totalDue ?? 0,
+          balance: c.totalDue ?? c.currentBalance ?? 0,
           creditLimit: c.creditLimit ?? 5000,
+          dueDate: c.dueDate ?? "",
           lastPaid: "N/A",
         }));
         setCustomers(mapped);
       } catch (err) {
         console.error("Error loading customers from backend, falling back to mock data:", err);
         setCustomers(initialCustomers);
+      } finally {
+        if (mounted) setLoading(false);
       }
     })();
 
@@ -143,6 +154,8 @@ const Customers = () => {
       phone: newCustomer.phone,
       creditLimit: Number(newCustomer.creditLimit) || 5000,
       totalDue: Number(newCustomer.openingBalance) || 0,
+      currentBalance: Number(newCustomer.openingBalance) || 0,
+      dueDate: newCustomer.dueDate || "",
     };
     (async () => {
       try {
@@ -155,8 +168,9 @@ const Customers = () => {
                     ...c,
                     name: updated.name,
                     phone: updated.phone,
-                    balance: updated.totalDue ?? 0,
+                    balance: updated.totalDue ?? updated.currentBalance ?? 0,
                     creditLimit: updated.creditLimit ?? 5000,
+                    dueDate: updated.dueDate ?? "",
                   }
                 : c,
             ),
@@ -168,8 +182,9 @@ const Customers = () => {
             id: created._id || created.id,
             name: created.name,
             phone: created.phone,
-            balance: created.totalDue ?? 0,
+            balance: created.totalDue ?? created.currentBalance ?? 0,
             creditLimit: created.creditLimit ?? 5000,
+            dueDate: created.dueDate ?? "",
             lastPaid: "Never",
           };
           setCustomers([customerObj, ...customers]);
@@ -180,6 +195,7 @@ const Customers = () => {
           phone: "",
           openingBalance: "",
           creditLimit: "5000",
+          dueDate: "",
         });
       } catch (err) {
         console.error("Save customer failed", err);
@@ -237,6 +253,7 @@ const Customers = () => {
       phone: customer.phone,
       openingBalance: customer.balance.toString(),
       creditLimit: customer.creditLimit.toString(),
+      dueDate: customer.dueDate || "",
     });
     setIsAddModalOpen(true);
   };
@@ -244,13 +261,8 @@ const Customers = () => {
   const handleWhatsAppReminder = (customer) => {
     if (customer.balance === 0) return;
 
-    let message = `*Dear ${customer.name},*\n\n`;
-    message += `This is a friendly reminder from *${businessName || "SmartInvoice"}* regarding your outstanding balance (Udhaar).\n\n`;
-    message += `*Details:*\n`;
-    message += `- Pending Udhaar: ₹${customer.balance.toLocaleString("en-IN")}\n`;
-    message += `- Credit Limit: ₹${customer.creditLimit.toLocaleString("en-IN")}\n\n`;
-    message += `Please clear your pending balance at your earliest convenience. You can pay at the shop or via online transfer.\n\n`;
-    message += `Thank you for your support! 🙏`;
+    const shopName = businessName || "SmartInvoice Business";
+    const textMessage = `Namaste ${customer.name} bhai, %0A%0AAapka hamari dukan *${shopName}* par *₹${customer.balance.toLocaleString("en-IN")}* ka udhaar (pending balance) baqaya hai. %0AKripya isey waqt par jama karein taaki aapka credit score sahi rahe. %0A%0A_Generated via SmartInvoice ERP_`;
 
     const cleanPhone = customer.phone.replace(/\D/g, "");
     if (cleanPhone.length !== 10) {
@@ -258,8 +270,7 @@ const Customers = () => {
       return;
     }
 
-    const encodedText = encodeURIComponent(message);
-    const whatsappUrl = `https://api.whatsapp.com/send?phone=91${cleanPhone}&text=${encodedText}`;
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=91${cleanPhone}&text=${textMessage}`;
     window.open(whatsappUrl, "_blank");
   };
 
@@ -316,8 +327,39 @@ const Customers = () => {
             {t.customersSubtitle || "Dukaan ka digital credit ledger / udhaar book."}
           </p>
         </div>
+        <div className="flex items-center gap-3">
+          {/* List/Grid toggle buttons */}
+          <div className={`flex items-center p-1 rounded-xl border ${themeMode === "dark" ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`p-2 rounded-lg transition-all cursor-pointer ${
+                viewMode === "grid"
+                  ? `bg-${primaryColor}-600 text-white`
+                  : themeMode === "dark"
+                    ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-150"
+              }`}
+              title="Grid Cards View"
+            >
+              <Grid size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={`p-2 rounded-lg transition-all cursor-pointer ${
+                viewMode === "table"
+                  ? `bg-${primaryColor}-600 text-white`
+                  : themeMode === "dark"
+                    ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-150"
+              }`}
+              title="List Table View"
+            >
+              <List size={18} />
+            </button>
+          </div>
 
-        <div className="flex gap-3">
           <button
             type="button"
             onClick={handlePrintLedger}
@@ -334,6 +376,7 @@ const Customers = () => {
                 phone: "",
                 openingBalance: "",
                 creditLimit: "5000",
+                dueDate: "",
               });
               setIsAddModalOpen(true);
             }}
@@ -343,6 +386,35 @@ const Customers = () => {
           </button>
         </div>
       </div>
+
+      {/* Active OVER LIMIT Alert System Warning Banner */}
+      {overLimitCustomersCount > 0 && (
+        <div className={`mb-6 p-4 rounded-2xl border flex items-center justify-between gap-4 border-red-500/30 ${
+          themeMode === "dark" 
+            ? "bg-red-950/40 text-red-400" 
+            : "bg-red-50 text-red-700"
+        }`}>
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="animate-pulse text-red-500" size={24} />
+            <div>
+              <p className="font-bold text-sm">⚠️ High Risk Udhaar Warning!</p>
+              <p className="text-xs opacity-90 mt-0.5">
+                {overLimitCustomersCount} customer(s) have exceeded their credit limit! Please send reminders or halt credit checkouts.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setFilterType("OverLimit")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all whitespace-nowrap hover:scale-105 ${
+              themeMode === "dark" 
+                ? "bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-700" 
+                : "bg-red-200 hover:bg-red-300 text-red-800 border border-red-300"
+            }`}
+          >
+            Review Accounts
+          </button>
+        </div>
+      )}
 
       {/* Stats Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -435,171 +507,326 @@ const Customers = () => {
         </div>
       </div>
 
-      {/* CUSTOMERS LIST TABLE */}
-      <div className={`rounded-xl border shadow-sm overflow-hidden ${cardBg}`}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr
-                className={`border-b ${themeMode === "dark" ? "border-gray-700 bg-gray-900/50" : "border-gray-200 bg-gray-50"}`}
-              >
-                <th className="p-4 font-semibold text-sm">{t.customerDetailsCol || "Grahak Details"}</th>
-                <th className="p-4 font-semibold text-sm">{t.phoneCol || "Phone Number"}</th>
-                <th className="p-4 font-semibold text-sm">{t.creditLimitCol || "Credit Limit"}</th>
-                <th className="p-4 font-semibold text-sm">
-                  {t.outstandingCol || "Baqaya Udhaar / Last Paid"}
-                </th>
-                <th className="p-4 font-semibold text-sm text-center">
-                  {t.actionsCol || "Actions"}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredCustomers.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className={`p-8 text-center ${textMuted}`}>
-                    {t.noCustomersFound || "Koi grahak nahi mila."}
-                  </td>
-                </tr>
-              ) : (
-                filteredCustomers.map((customer) => {
-                  const isOverLimit = customer.balance > customer.creditLimit;
-
-                  return (
-                    <tr
-                      key={customer.id}
-                      className={`border-b transition-colors duration-150 ${themeMode === "dark" ? "border-gray-700" : "border-gray-100"} ${rowHover}`}
-                    >
-                      <td className="p-4">
-                        <div className="font-bold text-base flex items-center gap-2">
-                          {customer.name}
-                          {isOverLimit && (
-                            <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-black border animate-pulse ${themeMode === "dark" ? "bg-red-950 text-red-400 border-red-900" : "bg-red-100 text-red-700 border-red-300"}`}>
-                              <AlertTriangle size={10} /> {t.overLimitLabel || "OVER LIMIT"}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-1.5 text-sm font-medium">
-                          <span>{customer.phone || "---"}</span>
+      {/* LOADING STATE PLACEHOLDER */}
+      {loading ? (
+        <div className="p-12 text-center font-bold text-lg flex flex-col items-center justify-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
+          <span>Khata Book sync ho rahi hai...</span>
+        </div>
+      ) : viewMode === "grid" ? (
+        /* CARD GRID DIRECTORY */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+          {filteredCustomers.length === 0 ? (
+            <div className={`col-span-full p-12 text-center ${textMuted} rounded-2xl border ${cardBg}`}>
+              {t.noCustomersFound || "Koi grahak nahi mila."}
+            </div>
+          ) : (
+            filteredCustomers.map((customer) => {
+              const isOverLimit = customer.balance > customer.creditLimit;
+              return (
+                <div 
+                  key={customer.id} 
+                  className={`p-5 rounded-2xl border shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.015] hover:shadow-md ${cardBg}`}
+                >
+                  {/* Upper Identity Blocks */}
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="text-lg font-black tracking-tight">{customer.name}</h3>
+                        <div className={`flex items-center gap-1 text-xs mt-1 ${textMuted}`}>
+                          <Phone size={11} />
+                          <span>+91 {customer.phone || "---"}</span>
                           {customer.phone && (
                             <a
                               href={`tel:${customer.phone}`}
-                              className="text-blue-500 hover:text-blue-400 p-0.5 animate-pulse"
+                              className="text-blue-500 hover:text-blue-400 p-0.5 animate-pulse ml-1"
                               title={t.directPhoneCall || "Direct Phone Call"}
                             >
-                              <Phone size={12} />
+                              <Phone size={10} />
                             </a>
                           )}
                         </div>
-                      </td>
+                      </div>
 
-                      <td className={`p-4 text-sm font-medium ${textMuted}`}>
-                        <span className="flex items-center text-xs">
-                          <IndianRupee size={12} />
-                          {customer.creditLimit}
+                      {/* DYNAMIC RISK INDICATOR BADGE */}
+                      {isOverLimit ? (
+                        <span className="flex items-center gap-1 px-2.5 py-1 text-xs font-black uppercase tracking-wider bg-red-500/10 text-red-500 rounded-lg border border-red-500/20 animate-pulse">
+                          <AlertTriangle size={12} /> Over Limit
                         </span>
-                      </td>
+                      ) : (
+                        <span className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-500 rounded-lg border border-emerald-500/20">
+                          <CheckCircle size={12} /> Safe Account
+                        </span>
+                      )}
+                    </div>
 
-                      <td className="p-4">
-                        {customer.balance > 0 ? (
-                          <div>
-                            <span className="inline-flex items-center gap-0.5 font-extrabold text-red-500 text-base">
-                              <IndianRupee size={16} /> {customer.balance}
-                            </span>
-                            <div className="text-[11px] text-gray-500 mt-0.5">
-                              {t.paidLabel || "Paid:"} {customer.lastPaid}
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <span className={`inline-flex items-center gap-1 font-bold text-xs px-2 py-0.5 rounded-full ${themeMode === "dark" ? "bg-green-900/30 text-green-400" : "bg-green-100 text-green-700"}`}>
-                              {t.clearLabel || "Clear 👍"}
-                            </span>
-                            <div className="text-[11px] text-gray-500 mt-0.5">
-                              {t.paidLabel || "Paid:"} {customer.lastPaid}
-                            </div>
-                          </div>
-                        )}
-                      </td>
+                    {/* Financial Balance Bars */}
+                    <div className="mt-5 space-y-2">
+                      <div className="flex justify-between items-end">
+                        <span className={`text-xs font-bold ${textMuted}`}>Outstanding Udhaar:</span>
+                        <span className={`text-2xl font-black ${isOverLimit ? "text-red-500" : themeMode === "dark" ? "text-white" : "text-gray-900"}`}>
+                          ₹{customer.balance.toLocaleString("en-IN")}
+                        </span>
+                      </div>
 
-                      {/* ACTIONS ROW - FIXED & ALIGNED */}
-                      <td className="p-4 text-center">
-                        <div className="inline-flex items-center justify-center gap-3 w-full">
-                          {/* 1. Vasooli Button with Fixed Spacer */}
-                          {customer.balance > 0 ? (
-                            <button
-                              onClick={() => openPaymentModal(customer)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors h-9 cursor-pointer ${
-                                themeMode === "dark"
-                                  ? "bg-emerald-950 text-emerald-400 hover:bg-emerald-900 border border-emerald-800"
-                                  : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-                              }`}
-                            >
-                              <HandCoins size={14} /> {t.vasooliBtn || "Vasooli"}
-                            </button>
-                          ) : (
-                            <div className="w-[84px] h-9 invisible sm:block"></div>
-                          )}
+                      {/* Progress visual limit tracker */}
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-300 ${isOverLimit ? "bg-red-500" : "bg-emerald-500"}`}
+                          style={{ width: `${Math.min((customer.balance / customer.creditLimit) * 100, 100)}%` }}
+                        ></div>
+                      </div>
+                      
+                      <div className="flex justify-between text-[11px] font-bold text-gray-400">
+                        <span>Limit: ₹{customer.creditLimit}</span>
+                        {customer.dueDate && <span className="text-amber-500 flex items-center gap-0.5">📅 Due: {customer.dueDate}</span>}
+                      </div>
+                    </div>
+                  </div>
 
-                          {/* 2. WhatsApp Button */}
-                          <button
-                            onClick={() => handleWhatsAppReminder(customer)}
-                            disabled={customer.balance === 0}
-                            className={`p-2 rounded-lg transition-colors border h-9 w-9 flex items-center justify-center cursor-pointer ${
-                              customer.balance === 0
-                                ? themeMode === "dark"
-                                  ? "border-gray-700 text-gray-600 cursor-not-allowed opacity-40"
-                                  : "border-gray-200 text-gray-300 cursor-not-allowed opacity-40"
-                                : themeMode === "dark"
-                                  ? "border-green-800 text-green-400 hover:bg-green-950/50"
-                                  : "border-green-200 text-green-600 hover:bg-green-50"
-                            }`}
-                            title={
-                              customer.balance > 0
-                                ? t.sendWhatsAppReminder || "Send WhatsApp Reminder"
-                                : t.noBalanceToRemind || "No balance to remind"
-                            }
-                          >
-                            <MessageCircle size={16} />
-                          </button>
+                  {/* ACTION TRIGGER BUTTONS */}
+                  <div className="mt-6 pt-4 border-t border-gray-100 dark:border-gray-700 flex flex-col gap-3">
+                    
+                    {/* Send WhatsApp Reminder Button (User's layout) */}
+                    <button
+                      onClick={() => handleWhatsAppReminder(customer)}
+                      disabled={customer.balance === 0}
+                      className={`w-full py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                        customer.balance === 0
+                          ? themeMode === "dark"
+                            ? "bg-gray-700 text-gray-500 cursor-not-allowed opacity-50"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed opacity-50"
+                          : isOverLimit 
+                            ? "bg-red-600 text-white hover:bg-red-700 shadow-red-500/10 cursor-pointer" 
+                            : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-500/10 cursor-pointer"
+                      }`}
+                    >
+                      <Send size={14} /> Send WhatsApp Reminder
+                    </button>
 
-                          {/* 3. Edit Button */}
-                          <button
-                            onClick={() => handleEditCustomer(customer)}
-                            className={`p-2 rounded-lg transition-colors border h-9 w-9 flex items-center justify-center cursor-pointer ${
-                              themeMode === "dark"
-                                ? "border-blue-900 text-blue-400 hover:bg-blue-950/50"
-                                  : "border-blue-200 text-blue-600 hover:bg-blue-50"
-                            }`}
-                            title={t.editKhata || "Edit Khata"}
-                          >
-                            <Edit size={16} />
-                          </button>
-
-                          {/* 4. Delete Button */}
-                          <button
-                            onClick={() => handleDeleteCustomer(customer.id)}
-                            className={`p-2 rounded-lg transition-colors border h-9 w-9 flex items-center justify-center cursor-pointer ${
-                              themeMode === "dark"
-                                ? "border-red-900 text-red-400 hover:bg-red-950/50"
-                                : "border-red-200 text-red-600 hover:bg-red-50"
-                            }`}
-                            title={t.deleteKhata || "Delete Khata"}
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                    {/* Operational Actions */}
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      {customer.balance > 0 ? (
+                        <button
+                          onClick={() => openPaymentModal(customer)}
+                          className={`flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all border cursor-pointer ${
+                            themeMode === "dark"
+                              ? "bg-emerald-950 text-emerald-400 hover:bg-emerald-900 border-emerald-800"
+                              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
+                          }`}
+                        >
+                          <HandCoins size={14} /> {t.vasooliBtn || "Vasooli"}
+                        </button>
+                      ) : (
+                        <div className="flex-1 text-center py-2 text-xs font-bold text-green-500 bg-green-500/10 rounded-xl">
+                          Hisaab Clear 👍
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                      )}
+
+                      <button
+                        onClick={() => handleEditCustomer(customer)}
+                        className={`p-2 rounded-xl transition-all border flex items-center justify-center cursor-pointer ${
+                          themeMode === "dark"
+                            ? "border-blue-900 text-blue-400 hover:bg-blue-950/50"
+                            : "border-blue-200 text-blue-600 hover:bg-blue-50"
+                        }`}
+                        title={t.editKhata || "Edit Khata"}
+                      >
+                        <Edit size={15} />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteCustomer(customer.id)}
+                        className={`p-2 rounded-xl transition-all border flex items-center justify-center cursor-pointer ${
+                          themeMode === "dark"
+                            ? "border-red-900 text-red-400 hover:bg-red-950/50"
+                            : "border-red-200 text-red-600 hover:bg-red-50"
+                        }`}
+                        title={t.deleteKhata || "Delete Khata"}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
-      </div>
+      ) : (
+        /* ORIGINAL PREMIUM TABLE VIEW */
+        <div className={`rounded-xl border shadow-sm overflow-hidden mb-8 ${cardBg}`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr
+                  className={`border-b ${themeMode === "dark" ? "border-gray-700 bg-gray-900/50" : "border-gray-200 bg-gray-50"}`}
+                >
+                  <th className="p-4 font-semibold text-sm">{t.customerDetailsCol || "Grahak Details"}</th>
+                  <th className="p-4 font-semibold text-sm">{t.phoneCol || "Phone Number"}</th>
+                  <th className="p-4 font-semibold text-sm">{t.creditLimitCol || "Credit Limit"}</th>
+                  <th className="p-4 font-semibold text-sm">
+                    {t.outstandingCol || "Baqaya Udhaar / Last Paid"}
+                  </th>
+                  <th className="p-4 font-semibold text-sm text-center">
+                    {t.actionsCol || "Actions"}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCustomers.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className={`p-8 text-center ${textMuted}`}>
+                      {t.noCustomersFound || "Koi grahak nahi mila."}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCustomers.map((customer) => {
+                    const isOverLimit = customer.balance > customer.creditLimit;
+
+                    return (
+                      <tr
+                        key={customer.id}
+                        className={`border-b transition-colors duration-150 ${themeMode === "dark" ? "border-gray-700" : "border-gray-100"} ${rowHover}`}
+                      >
+                        <td className="p-4">
+                          <div className="font-bold text-base flex items-center gap-2">
+                            {customer.name}
+                            {isOverLimit && (
+                              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-black border animate-pulse ${themeMode === "dark" ? "bg-red-950 text-red-400 border-red-900" : "bg-red-100 text-red-700 border-red-300"}`}>
+                                <AlertTriangle size={10} /> {t.overLimitLabel || "OVER LIMIT"}
+                              </span>
+                            )}
+                          </div>
+                          {customer.dueDate && (
+                            <div className={`text-xs flex items-center gap-1 mt-1 ${themeMode === "dark" ? "text-gray-400" : "text-gray-500"}`}>
+                              <span>📅 Due:</span>
+                              <span className="font-semibold text-red-500">{customer.dueDate}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-1.5 text-sm font-medium">
+                            <span>{customer.phone || "---"}</span>
+                            {customer.phone && (
+                              <a
+                                href={`tel:${customer.phone}`}
+                                className="text-blue-500 hover:text-blue-400 p-0.5 animate-pulse"
+                                title={t.directPhoneCall || "Direct Phone Call"}
+                              >
+                                <Phone size={12} />
+                              </a>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className={`p-4 text-sm font-medium ${textMuted}`}>
+                          <span className="flex items-center text-xs">
+                            <IndianRupee size={12} />
+                            {customer.creditLimit}
+                          </span>
+                        </td>
+
+                        <td className="p-4">
+                          {customer.balance > 0 ? (
+                            <div>
+                              <span className="inline-flex items-center gap-0.5 font-extrabold text-red-500 text-base">
+                                <IndianRupee size={16} /> {customer.balance}
+                              </span>
+                              <div className="text-[11px] text-gray-500 mt-0.5">
+                                {t.paidLabel || "Paid:"} {customer.lastPaid}
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className={`inline-flex items-center gap-1 font-bold text-xs px-2 py-0.5 rounded-full ${themeMode === "dark" ? "bg-green-900/30 text-green-400" : "bg-green-100 text-green-700"}`}>
+                                {t.clearLabel || "Clear 👍"}
+                              </span>
+                              <div className="text-[11px] text-gray-500 mt-0.5">
+                                {t.paidLabel || "Paid:"} {customer.lastPaid}
+                              </div>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* ACTIONS ROW - FIXED & ALIGNED */}
+                        <td className="p-4 text-center">
+                          <div className="inline-flex items-center justify-center gap-3 w-full">
+                            {/* 1. Vasooli Button with Fixed Spacer */}
+                            {customer.balance > 0 ? (
+                              <button
+                                onClick={() => openPaymentModal(customer)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors h-9 cursor-pointer ${
+                                  themeMode === "dark"
+                                    ? "bg-emerald-950 text-emerald-400 hover:bg-emerald-900 border border-emerald-800"
+                                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                                }`}
+                              >
+                                <HandCoins size={14} /> {t.vasooliBtn || "Vasooli"}
+                              </button>
+                            ) : (
+                              <div className="w-[84px] h-9 invisible sm:block"></div>
+                            )}
+
+                            {/* 2. WhatsApp Button */}
+                            <button
+                              onClick={() => handleWhatsAppReminder(customer)}
+                              disabled={customer.balance === 0}
+                              className={`p-2 rounded-lg transition-colors border h-9 w-9 flex items-center justify-center cursor-pointer ${
+                                customer.balance === 0
+                                  ? themeMode === "dark"
+                                    ? "border-gray-700 text-gray-600 cursor-not-allowed opacity-40"
+                                    : "border-gray-200 text-gray-300 cursor-not-allowed opacity-40"
+                                  : themeMode === "dark"
+                                    ? "border-green-800 text-green-400 hover:bg-green-950/50"
+                                    : "border-green-200 text-green-600 hover:bg-green-50"
+                              }`}
+                              title={
+                                customer.balance > 0
+                                  ? t.sendWhatsAppReminder || "Send WhatsApp Reminder"
+                                  : t.noBalanceToRemind || "No balance to remind"
+                              }
+                            >
+                              <MessageCircle size={16} />
+                            </button>
+
+                            {/* 3. Edit Button */}
+                            <button
+                              onClick={() => handleEditCustomer(customer)}
+                              className={`p-2 rounded-lg transition-colors border h-9 w-9 flex items-center justify-center cursor-pointer ${
+                                themeMode === "dark"
+                                  ? "border-blue-900 text-blue-400 hover:bg-blue-950/50"
+                                    : "border-blue-200 text-blue-600 hover:bg-blue-50"
+                              }`}
+                              title={t.editKhata || "Edit Khata"}
+                            >
+                              <Edit size={16} />
+                            </button>
+
+                            {/* 4. Delete Button */}
+                            <button
+                              onClick={() => handleDeleteCustomer(customer.id)}
+                              className={`p-2 rounded-lg transition-colors border h-9 w-9 flex items-center justify-center cursor-pointer ${
+                                themeMode === "dark"
+                                  ? "border-red-900 text-red-400 hover:bg-red-950/50"
+                                  : "border-red-200 text-red-600 hover:bg-red-50"
+                              }`}
+                              title={t.deleteKhata || "Delete Khata"}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: ADD CUSTOMER */}
       {isAddModalOpen && (
@@ -712,6 +939,21 @@ const Customers = () => {
                     />
                   </div>
                 </div>
+              </div>
+              <div>
+                <label
+                  className={`block text-xs font-bold mb-1 uppercase tracking-wide ${textMuted}`}
+                >
+                  Due Date (Kab tak paisa lautana hai)
+                </label>
+                <input
+                  type="date"
+                  value={newCustomer.dueDate || ""}
+                  onChange={(e) =>
+                    setNewCustomer({ ...newCustomer, dueDate: e.target.value })
+                  }
+                  className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none ${inputBg}`}
+                />
               </div>
               <div className="pt-4 flex justify-end gap-3">
                 <button

@@ -15,6 +15,11 @@ router.get("/", async (req, res) => {
 // Create a new customer
 router.post("/", async (req, res) => {
   try {
+    if (req.body.totalDue !== undefined && req.body.currentBalance === undefined) {
+      req.body.currentBalance = req.body.totalDue;
+    } else if (req.body.currentBalance !== undefined && req.body.totalDue === undefined) {
+      req.body.totalDue = req.body.currentBalance;
+    }
     const newCustomer = new Customer(req.body);
     const savedCustomer = await newCustomer.save();
     res.status(201).json(savedCustomer);
@@ -60,6 +65,12 @@ router.put("/:id", async (req, res) => {
         description: paymentMethod === "Cash" ? `Customer Vasooli (Cash Drawer)` : `Customer Vasooli (Udhaar Collection)`
       });
       await bankLog.save();
+    }
+
+    if (req.body.totalDue !== undefined && req.body.currentBalance === undefined) {
+      req.body.currentBalance = req.body.totalDue;
+    } else if (req.body.currentBalance !== undefined && req.body.totalDue === undefined) {
+      req.body.totalDue = req.body.currentBalance;
     }
 
     const updatedCustomer = await Customer.findByIdAndUpdate(

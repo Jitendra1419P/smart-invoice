@@ -27,6 +27,7 @@ import {
     Check,
     PackagePlus,
     Printer,
+    PackageCheck,
 } from 'lucide-react';
 
 const Suppliers = () => {
@@ -68,6 +69,17 @@ const Suppliers = () => {
         itemCost: '',
     });
 
+    // NEW: Procurement Engine States
+    const [products, setProducts] = useState([]);
+    const [isProcureModalOpen, setIsProcureModalOpen] = useState(false);
+    const [procureForm, setProcureForm] = useState({
+        supplierId: "",
+        productId: "",
+        quantity: "",
+        totalCost: "",
+        isPaid: false
+    });
+
     // Theme Colors
     const bgMain =
         themeMode === 'dark'
@@ -90,61 +102,73 @@ const Suppliers = () => {
 
     const [supplierProducts, setSupplierProducts] = useState({});
 
-    useEffect(() => {
-        let mounted = true;
-        (async () => {
-            try {
-                const [suppliersData, productsData, bankAccountsData] = await Promise.all([
-                    api.getSuppliers(),
-                    api.getProducts(),
-                    api.getBankAccounts(),
-                ]);
-                if (!mounted) return;
+    const loadData = async () => {
+        try {
+            const [suppliersData, productsData, bankAccountsData] = await Promise.all([
+                api.getSuppliers(),
+                api.getProducts(),
+                api.getBankAccounts(),
+            ]);
 
-                const mappedSuppliers = suppliersData.map((s) => ({
-                    id: s._id || s.id,
-                    name: s.name,
-                    company: s.name,
-                    phone: s.phone,
-                    payable: s.totalPayable ?? 0,
-                    address: s.address ?? '',
-                }));
-                setSuppliers(mappedSuppliers);
+            const mappedSuppliers = suppliersData.map((s) => ({
+                id: s._id || s.id,
+                name: s.name,
+                company: s.name,
+                phone: s.phone,
+                payable: s.totalPayable ?? 0,
+                address: s.address ?? '',
+            }));
+            setSuppliers(mappedSuppliers);
 
-                // Group products dynamically by their supplier's name
-                const grouped = {};
-                mappedSuppliers.forEach((s) => {
-                    grouped[s.company] = [];
-                });
+            // Group products dynamically by their supplier's name
+            const grouped = {};
+            mappedSuppliers.forEach((s) => {
+                grouped[s.company] = [];
+            });
 
-                productsData.forEach((p) => {
-                    const sName = p.supplierId?.name || p.supplier || 'Unknown';
-                    if (!grouped[sName]) {
-                        grouped[sName] = [];
-                    }
-                    grouped[sName].push({
-                        id: p._id || p.id,
-                        name: p.name + (p.weight ? ` (${p.weight})` : ''),
-                        stock: p.stock ?? 0,
-                        minStock: p.minStock ?? 10,
-                        price: p.price ?? p.salePrice ?? 0,
-                    });
-                });
-                setSupplierProducts(grouped);
-
-                setBankAccounts(bankAccountsData);
-                if (bankAccountsData.length > 0) {
-                    setSelectedBankId(bankAccountsData[0]._id || bankAccountsData[0].id);
+            productsData.forEach((p) => {
+                const sName = p.supplierId?.name || p.supplier || 'Unknown';
+                if (!grouped[sName]) {
+                    grouped[sName] = [];
                 }
-            } catch (err) {
-                console.error('Load suppliers, products and banks failed', err);
-                setSuppliers(initialSuppliers);
-                setSupplierProducts(initialSupplierProducts);
+                grouped[sName].push({
+                    id: p._id || p.id,
+                    name: p.name + (p.weight ? ` (${p.weight})` : ''),
+                    stock: p.stock ?? 0,
+                    minStock: p.minStock ?? 10,
+                    price: p.price ?? p.salePrice ?? 0,
+                });
+            });
+            setSupplierProducts(grouped);
+
+            // Set flat products list for procure dropdown
+            const mappedProducts = productsData.map((p) => ({
+                id: p._id || p.id,
+                name: p.name + (p.weight ? ` (${p.weight})` : ''),
+                stock: p.stock ?? 0,
+                price: p.price ?? p.salePrice ?? 0,
+            }));
+            setProducts(mappedProducts);
+
+            setBankAccounts(bankAccountsData);
+            if (bankAccountsData.length > 0) {
+                setSelectedBankId(bankAccountsData[0]._id || bankAccountsData[0].id);
             }
-        })();
-        return () => {
-            mounted = false;
-        };
+        } catch (err) {
+            console.error('Load suppliers, products and banks failed', err);
+            setSuppliers(initialSuppliers);
+            setSupplierProducts(initialSupplierProducts);
+            setProducts(initialProducts.map(p => ({
+                id: p.id,
+                name: p.name + (p.weight ? ` (${p.weight})` : ''),
+                stock: p.stock ?? 0,
+                price: p.price ?? p.salePrice ?? 0,
+            })));
+        }
+    };
+
+    useEffect(() => {
+        loadData();
     }, []);
 
     // Search & Filter Logic
@@ -264,6 +288,39 @@ const Suppliers = () => {
 
         setIsPurchaseModalOpen(false);
         setPurchaseData({ productName: '', qtyToAdd: '', itemCost: '' });
+    };
+
+    // Special Procurement form submission handler
+    const handleProcureSubmit = async (e) => {
+        e.preventDefault();
+        if (!procureForm.supplierId || !procureForm.productId || !procureForm.quantity || !procureForm.totalCost) {
+            alert("Bhai saari fields barabar bharo!");
+            return;
+        }
+
+        try {
+            await api.procureSupplierGoods({
+                supplierId: procureForm.supplierId,
+                productId: procureForm.productId,
+                quantity: Number(procureForm.quantity),
+                totalCost: Number(procureForm.totalCost),
+                isPaid: procureForm.isPaid
+            });
+            
+            alert("⚡ Maal entry saved! Stock incremented and supplier liability updated successfully.");
+            setIsProcureModalOpen(false);
+            setProcureForm({
+                supplierId: "",
+                productId: "",
+                quantity: "",
+                totalCost: "",
+                isPaid: false
+            });
+            await loadData();
+        } catch (err) {
+            console.error("Procurement sync failed:", err);
+            alert("Maal entry fail ho gaya, kripya check karein.");
+        }
     };
 
     const openPaymentModal = (supplier) => {
@@ -428,6 +485,22 @@ const Suppliers = () => {
                         className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md bg-${primaryColor}-600 text-white hover:bg-${primaryColor}-700 hover:-translate-y-0.5`}
                     >
                         <Plus size={20} /> Naya Supplier Jodein
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setProcureForm({
+                                supplierId: "",
+                                productId: "",
+                                quantity: "",
+                                totalCost: "",
+                                isPaid: false
+                            });
+                            setIsProcureModalOpen(true);
+                        }}
+                        className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-md bg-purple-600 text-white hover:bg-purple-700 hover:-translate-y-0.5`}
+                    >
+                        <PackageCheck size={20} /> + Maal Receipt Entry
                     </button>
                 </div>
             </div>
@@ -1247,6 +1320,110 @@ const Suppliers = () => {
                                     className="px-5 py-2 rounded-xl font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md"
                                 >
                                     Jama Karein (Save)
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+            {/* ========================================= */}
+            {/* AUTOMATED STOCK INTAKE MODAL COMPONENT */}
+            {/* ========================================= */}
+            {isProcureModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center p-4 z-50">
+                    <div className={`w-full max-w-md p-6 rounded-2xl border shadow-2xl ${cardBg}`}>
+                        <h3 className="text-xl font-black mb-4 flex items-center gap-1.5 text-blue-500">
+                            <PackageCheck size={22} /> + Naya Maal Entry (Inventory Intake)
+                        </h3>
+                        
+                        <form onSubmit={handleProcureSubmit} className="space-y-4">
+                            {/* Supplier Select Dropdown */}
+                            <div>
+                                <label className="block text-xs font-bold uppercase mb-1">Select Wholesaler / Supplier</label>
+                                <select 
+                                    className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
+                                    value={procureForm.supplierId}
+                                    onChange={(e) => setProcureForm({...procureForm, supplierId: e.target.value})}
+                                    required
+                                >
+                                    <option value="">-- Kisse maal aaya chunie --</option>
+                                    {suppliers.map(s => (
+                                        <option key={s.id} value={s.id}>{s.name} ({s.company})</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Product Target Select Dropdown */}
+                            <div>
+                                <label className="block text-xs font-bold uppercase mb-1">Select Inventory Item</label>
+                                <select 
+                                    className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
+                                    value={procureForm.productId}
+                                    onChange={(e) => setProcureForm({...procureForm, productId: e.target.value})}
+                                    required
+                                >
+                                    <option value="">-- Kaun sa maal aaya chunie --</option>
+                                    {products.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock})</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold uppercase mb-1">Quantity (Pcs/Box)</label>
+                                    <input 
+                                        type="number" 
+                                        placeholder="e.g. 50"
+                                        min="1"
+                                        className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
+                                        value={procureForm.quantity}
+                                        onChange={(e) => setProcureForm({...procureForm, quantity: e.target.value})}
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold uppercase mb-1">Total Bill Cost (₹)</label>
+                                    <input 
+                                        type="number" 
+                                        placeholder="e.g. 12000"
+                                        min="0"
+                                        className={`w-full p-2.5 rounded-xl border focus:outline-none ${inputBg}`}
+                                        value={procureForm.totalCost}
+                                        onChange={(e) => setProcureForm({...procureForm, totalCost: e.target.value})}
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Payment Status Switch */}
+                            <div className="flex items-center gap-2 border-t pt-3 mt-2">
+                                <input 
+                                    type="checkbox" 
+                                    id="procurePaymentStatus"
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                    checked={procureForm.isPaid}
+                                    onChange={(e) => setProcureForm({...procureForm, isPaid: e.target.checked})}
+                                />
+                                <label htmlFor="procurePaymentStatus" className="text-sm font-bold cursor-pointer">
+                                    💰 Supplier ko cash payment de di hai (No Udhaar)
+                                </label>
+                            </div>
+
+                            {/* Form Actions Buttons */}
+                            <div className="flex gap-3 mt-6">
+                                <button 
+                                    type="button" 
+                                    onClick={() => setIsProcureModalOpen(false)}
+                                    className={`w-1/2 py-2.5 border rounded-xl font-bold ${themeMode === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'}`}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="submit" 
+                                    className="w-1/2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md"
+                                >
+                                    Receive Stock
                                 </button>
                             </div>
                         </form>
